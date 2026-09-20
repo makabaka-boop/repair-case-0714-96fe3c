@@ -1,0 +1,20 @@
+services:
+  # 静态站点：宿主端口由 WEB_PORT 覆盖，默认 8080。
+  # 用法：WEB_PORT=9000 docker compose up --build web
+  web:
+    build:
+      context: .
+      target: web
+    image: imposition-bench:web
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    restart: unless-stopped
+
+  # 一次性验收服务：跑完穷举/大夹具/类型/构建/性能即退出（退出码即结论）。
+  # 用法：docker compose build verify && docker compose run --rm verify
+  verify:
+    build:
+      context: .
+      target: verify
+    image: imposition-bench:verify
+    command: ["npm", "run", "verify"]
