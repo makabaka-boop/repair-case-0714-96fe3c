@@ -17,7 +17,9 @@ import { findConflicts } from './model';
  * 可行窗口 j ≥ L_i（容量 + 最后一个强制分页，L_i 单调不减）。
  * 斜率单调递减、查询点严格递增，用凸包队列做到均摊 O(n)。
  *
- * 插入新直线时移除交点次序逆转的中间线，使队列只保留全局下包络。
+ * 插入新直线时，仅当交点次序逆转（中线全局冗余）**且**后线接管点不晚于
+ * 前驱线的失效横坐标时才移除中线：窗口会滑动，前驱线因容量过期后，
+ * 被误删的中线可能在可行集内重新最优（反例：H=5、高度 [2,3,1]）。
  * 查询和过期淘汰都从队首单向推进。
  *
  * 交叉点比较全部使用 BigInt：S[j]² 可达 4e18，浮点比较会出错。
@@ -78,6 +80,24 @@ export function paginate(model: DocModel): PaginateOutcome {
     return lhs <= rhs;
   };
 
+  /**
+   * 前驱线 a 因容量滑出可行窗口的横坐标：S[i] − S[a] ≤ H ⟺ x ≤ H + S[a]。
+   * 强制分页不会分裂队内三元组：edge ≥ a 的 BREAK 会把 L 推过 a，每次迭代
+   * 查询前的队首淘汰已将其移出队列；更靠后的 BREAK 只会让 a、b、c 同时过期。
+   */
+  const expiryX = (a: number): bigint => BigInt(H) + BigInt(Math.round(S[a]));
+
+  /**
+   * 滑动窗口下中线 b 可安全删除的条件：全局冗余，且后线 c 的接管点不晚于
+   * 前驱线 a 的失效横坐标（x(b,c) ≤ H + S[a]，即 b_c−b_b ≤ (H+S[a])·(nm_c−nm_b)）。
+   * 否则 a 因容量过期后，b 会在可行集内重新最优
+   * （反例：H=5、高度 [2,3,1]，误删会得到代价 16 而非最优 10）。
+   */
+  const removable = (a: number, b: number, c: number): boolean => {
+    if (!redundant(a, b, c)) return false;
+    return bArr[c] - bArr[b] <= expiryX(a) * BigInt(Math.round(neg2m[c] - neg2m[b]));
+  };
+
   /** 队首查询：在 x 处 b(第二线) 不差于 a(第一线)。 */
   const frontWorse = (a: number, b: number, x: number): boolean => {
     return bArr[b] - bArr[a] <= BigInt(Math.round(x)) * BigInt(Math.round(neg2m[b] - neg2m[a]));
@@ -86,7 +106,7 @@ export function paginate(model: DocModel): PaginateOutcome {
   const pushLine = (j: number) => {
     bArr[j] = BigInt(Math.round(dp[j])) + 2n * BigInt(H) * BigInt(Math.round(S[j])) + BigInt(Math.round(S[j])) ** 2n;
     neg2m[j] = 2 * S[j];
-    while (tail - head >= 2 && redundant(hull[tail - 2], hull[tail - 1], j)) {
+    while (tail - head >= 2 && removable(hull[tail - 2], hull[tail - 1], j)) {
       tail--;
     }
     hull[tail++] = j;

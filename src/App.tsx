@@ -26,8 +26,9 @@ interface StaleTag {
 
 const ROW_H = 34;
 
+/** 深拷贝文档（含块数组）：采纳快照与逐项编辑都不得共享可变的 blocks。 */
 function snapshotModel(model: DocModel): DocModel {
-  return { ...model };
+  return { ...model, blocks: model.blocks.map((b) => ({ ...b })) };
 }
 
 function errorText(error: PaginateError): string {
@@ -52,12 +53,6 @@ export default function App() {
 
   const conflicts = useMemo(() => (model ? findConflicts(model) : []), [model]);
 
-  const clearWorkspaceForImport = () => {
-    setModel(null);
-    setFresh(null);
-    setAdopted(null);
-  };
-
   const loadRaw = (raw: unknown, source: string) => {
     const parsed = parseDoc(raw);
     if (!parsed.ok) {
@@ -73,7 +68,7 @@ export default function App() {
   };
 
   const onImportText = () => {
-    clearWorkspaceForImport();
+    // 先解析校验，成功才替换工作台；失败保留当前文档与已采纳版本。
     let json: unknown;
     try {
       json = JSON.parse(importText);
@@ -85,7 +80,6 @@ export default function App() {
   };
 
   const onFile = async (file: File) => {
-    clearWorkspaceForImport();
     try {
       const text = await file.text();
       const json = JSON.parse(text);

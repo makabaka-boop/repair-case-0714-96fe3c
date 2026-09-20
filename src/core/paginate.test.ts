@@ -224,6 +224,20 @@ describe('手工构造的关键情形', () => {
     expectValid(m, out);
   });
 
+  it('滑动窗口凸包回归：H=5、高度 [2,3,1]，容量过期后中线重新最优', () => {
+    // 线 1 相对线 0、2 全局冗余，但线 0 在 x>5 后因容量滑出窗口，
+    // 可行集内最优变为 {1}、{2,3}：代价 3² + 1² = 10，而非 {1,2}、{3} 的 16。
+    const m = makeModel(5, [2, 3, 1]);
+    const out = paginate(m);
+    expectValid(m, out);
+    if (out.ok) {
+      expect(out.result.cost).toBe(10);
+      expect(out.result.pages).toHaveLength(2);
+      expect(out.result.pages[0]).toMatchObject({ start: 0, end: 1 });
+      expect(out.result.pages[1]).toMatchObject({ start: 1, end: 3 });
+    }
+  });
+
   it('多重边界混合', () => {
     const H = 50;
     const m = makeModel(
