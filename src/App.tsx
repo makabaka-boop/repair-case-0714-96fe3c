@@ -27,7 +27,9 @@ interface StaleTag {
 const ROW_H = 34;
 
 function snapshotModel(model: DocModel): DocModel {
-  return { ...model };
+  // 深拷贝块数组：采纳快照必须定格采纳时刻的边界标记，
+  // 之后的边界编辑不得回写已采纳版本；编辑本身也不得改动旧状态。
+  return { ...model, blocks: model.blocks.map((b) => ({ ...b })) };
 }
 
 function errorText(error: PaginateError): string {
@@ -52,15 +54,10 @@ export default function App() {
 
   const conflicts = useMemo(() => (model ? findConflicts(model) : []), [model]);
 
-  const clearWorkspaceForImport = () => {
-    setModel(null);
-    setFresh(null);
-    setAdopted(null);
-  };
-
   const loadRaw = (raw: unknown, source: string) => {
     const parsed = parseDoc(raw);
     if (!parsed.ok) {
+      // 非法导入只提示原因：当前文档、计算结果与已采纳版本全部保留。
       setImportError(`导入失败（${source}）：${parsed.error.message}。当前文档与已采纳版本已保留。`);
       return;
     }
@@ -73,7 +70,6 @@ export default function App() {
   };
 
   const onImportText = () => {
-    clearWorkspaceForImport();
     let json: unknown;
     try {
       json = JSON.parse(importText);
@@ -85,7 +81,7 @@ export default function App() {
   };
 
   const onFile = async (file: File) => {
-    clearWorkspaceForImport();
+    // 先完成读取与解析，成功后才替换工作台；任何失败都不影响现有状态。
     try {
       const text = await file.text();
       const json = JSON.parse(text);

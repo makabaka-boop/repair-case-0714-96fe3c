@@ -17,7 +17,12 @@ import { findConflicts } from './model';
  * 可行窗口 j ≥ L_i（容量 + 最后一个强制分页，L_i 单调不减）。
  * 斜率单调递减、查询点严格递增，用凸包队列做到均摊 O(n)。
  *
- * 插入新直线时移除交点次序逆转的中间线，使队列只保留全局下包络。
+ * 插入新直线时，中线 b（前驱 a、新线 c）只有在同时满足两个条件时才可删除：
+ *   1. 全局冗余：x(a,b) ≥ x(b,c)，即 b 不在全局下包络上；
+ *   2. 窗口安全：c 接管 b 的横坐标 x(b,c) ≤ a 的失效横坐标。
+ * 条件 2 是滑动窗口下的关键正确性点：朴素做法只查条件 1，但 a 因容量或
+ * 强制分页从队首过期后，被删的 b 可能在可行窗口内重新成为最优
+ * （反例：H=5、高度 [2,3,1]，只查条件 1 会把最优代价 10 错算成 16）。
  * 查询和过期淘汰都从队首单向推进。
  *
  * 交叉点比较全部使用 BigInt：S[j]² 可达 4e18，浮点比较会出错。
@@ -56,6 +61,20 @@ export function paginate(model: DocModel): PaginateOutcome {
   /** 终点 i 可作页尾：i=n 恒可；i<n 要求尾边界 edge(i-1) 不是 SAME。 */
   const canEnd = (i: number): boolean => i === n || edgeAt(i - 1) !== SAME;
 
+  // 每条线 j 的失效横坐标：查询点 x 超过它后，j 必然已离开可行窗口。
+  // - 容量：x > H + S[j] 时 j < capPtr；
+  // - 强制分页：首个 e ≥ j 的 BREAK 边界令 L ≥ e+1 > j，自 x = S[e+2] 起生效。
+  // nextBreak[j] = 首个 ≥ j 的 BREAK 边界下标（n 表示不存在），后缀扫描 O(n)。
+  const nextBreak = new Int32Array(n + 1).fill(n);
+  for (let i = n - 1; i >= 0; i--) {
+    nextBreak[i] = edgeAt(i) === BREAK ? i : nextBreak[i + 1];
+  }
+  const expireX = new Float64Array(n + 1);
+  for (let j = 0; j <= n; j++) {
+    const byBreak = nextBreak[j] <= n - 2 ? S[nextBreak[j] + 2] : Number.POSITIVE_INFINITY;
+    expireX[j] = Math.min(H + S[j], byBreak);
+  }
+
   const dp = new Float64Array(n + 1).fill(Number.POSITIVE_INFINITY);
   const parent = new Int32Array(n + 1).fill(-1);
 
@@ -83,10 +102,27 @@ export function paginate(model: DocModel): PaginateOutcome {
     return bArr[b] - bArr[a] <= BigInt(Math.round(x)) * BigInt(Math.round(neg2m[b] - neg2m[a]));
   };
 
+  /**
+   * 窗口安全：c 接管 b 的横坐标 x(b,c) 不超过 a 的失效横坐标。
+   * 成立时 a 过期之日 c 已不劣于 b，b 不可能在可行窗口内重新最优；
+   * 不成立则必须保留 b。x(b,c) = (b_c−b_b)/(nm_c−nm_b) ≤ X 交叉相乘为
+   * b_c − b_b ≤ X·(nm_c − nm_b)，BigInt 精确比较。
+   */
+  const takeoverBeforeExpiry = (a: number, b: number, c: number): boolean => {
+    const x = expireX[a];
+    if (!Number.isFinite(x)) return true;
+    return bArr[c] - bArr[b] <= BigInt(Math.round(x)) * BigInt(Math.round(neg2m[c] - neg2m[b]));
+  };
+
   const pushLine = (j: number) => {
     bArr[j] = BigInt(Math.round(dp[j])) + 2n * BigInt(H) * BigInt(Math.round(S[j])) + BigInt(Math.round(S[j])) ** 2n;
     neg2m[j] = 2 * S[j];
-    while (tail - head >= 2 && redundant(hull[tail - 2], hull[tail - 1], j)) {
+    // 全局冗余且窗口安全的中线才允许删除（见文件头注释）。
+    while (
+      tail - head >= 2 &&
+      redundant(hull[tail - 2], hull[tail - 1], j) &&
+      takeoverBeforeExpiry(hull[tail - 2], hull[tail - 1], j)
+    ) {
       tail--;
     }
     hull[tail++] = j;
